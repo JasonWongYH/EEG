@@ -1,0 +1,317 @@
+*. (discuss) 'basic artefact rejection improved model performance, whereas further removal of peripheral signals using ICA decreased performance' 
+
+*. real time phase prediction NN
+
+*. (test,idea) real time computational feasibility
+    *. each GPU is assigned a signal processing task
+    
+*. 'Optimizing Spatial Filters for Robust EEG Single-Trial Analysis' IEEE 2008	
+	 Laplace filter and even more the CSP filter reveal a second spectral peak around 12 Hz with strong discriminative power. By further investigations, the
+
+
+*. right-hand movements, contralateral (left hemisphere) M1 is best approximated by:
+
+C3 – Channel 16 
+FC3 – Channel 41
+CP3 – Channel 47
+
+*. SMA is a midline structure, and typically recorded via:
+FCz – Channel 42
+Fz – Channel 6
+Cz – (Though not listed, it's often present; if Cz isn't included, use Fz and FCz as proxies)
+
+These electrodes lie over the interhemispheric fissure where the SMA is located
+
+*. Prenau Lab's use of multitaper spectrogram 
+	waveform shape (defined by ?) changing with a background noise that's changing
+		background noise ~ relative excitation/inhibition of neuronal populations
+		waveform shape ~ 
+	visualization of spectrogram of each epoch
+
+*. best practices from the winning solution 
+	https://github.com/alexandrebarachant/decoding-brain-challenge-2016 ..simple models that are ensembled.. 
+
+*. How to set up an ERP lab
+	*. typical recording parameters 
+
+*. muscle artifacts: online filtering of eye blinks 
+
+*. EMG (electromygram) signals used to detect onset of movement of pressing..filter of 20Hz was applied to the EMG signals offline.. time window of 400-0ms before the button was pressed (when the computer detected electric signals sent by the button) used to detect the onset of the action of pressing, defined as the first point that the EMG exceeded 8x variance from the average between 500−400ms prior to pressing the button.
+
+*. [weak electrical activity between [5µV,100µV]..frequency range of [1Hz,40 Hz].. ]
+
+alpha waves with high amplitudes over the occipital area => resting state with eyes closed..
+
+phase-locked signals ("evoked potentials") or non-phase locked signals ("event-related synchronization/desynchronization, ERS/ERD")..
+
+technical noise (amplifier noise, capacitive, or inductive effects) but also the activity of the brain itself.. 
+
+EEG rhythmic activities, observed over motor and related areas of the brain, disappear approximately one second prior to the onset of physical movement..
+
+amplified EEG was band pass filtered by an analog filter between 0.5 and 50 Hz and sampled at 128 Hz. The resolution was 12 bits. A notch filter was used to suppress the 50 Hz power line interference..
+
+*.  Whilst the Fourier transform extracts information about frequency, the signature transform extracts information about order and area. Furthermore (and unlike the Fourier transform), order and area represent all possible nonlinear effects: the signature transform is a universal nonlinearity, meaning that every continuous function of the input stream may be approximated arbitrary well by a linear function of its signature
+
+*. https://openneuro.org/datasets/ds003775/versions/1.2.1/download resting-state
+
+*. simulated datasets:
+
+	https://data.mrc.ox.ac.uk/data-set/simulated-eeg-data-generator
+
+*. xDAWN smoothing of spatial filters applied to identify ERPs arising from using the P300 speller: ask Seb Wills, Xiaoqi Xu
+
+*. brain waves (e.g., mu or beta rhythyms)..evoked potential corresponding to a positive deviation occurring around 300ms after the stimuli..time course of the ERP to be modeled through machine learning efficiently..visual oddball paradigm, where participants are shown repetitive (non-target) visual stimuli interspersed with infrequent (target) stimuli at a presentation
+rate (for example, 1 Hz).. observed over the parietal cortex, P300 waveform appears approximately 300 ms post stimulus onset..Event-Related Potential (ERP) BCIs are designed to detect a high amplitude and low frequency EEG response to a known, time-locked external stimulus..recorded EEG signals contain P300 potentials as well as other brain activities, muscular and/or ocular artifacts leading to a very low signal-to-noise ratio (SNR) of P300 potential..another way to improve the symbol prediction accuracy is to enhance the P300 evoked potentials by a spatial filtering of the channels..
+
+*. (slide - best practices) https://github.com/alexandrebarachant/decoding-brain-challenge-2016
+
+*. path integrals are invariant under a time reparametrization of both paths..some finite collection of terms must be selected.Since the magnitude of the terms exhibit factorial decay..Deep Signature Transform..consumes a tensor of shape
+(b, d, n) corresponding to a batch of size b of paths in R^d
+
+
+*. (1) https://se.mathworks.com/help/wavelet/ug/time-frequency-convolutional-network-for-eeg-data-classification.html differentiable scalogram layer in an EEGNet architecture applied to Stuart et al data.. 
+
+*. (2) https://www.bbci.de/competition/ii/download/index.html?agree=yes&submit=Submit superset of tasks and data
+
+*. What are signatures?
+The signature of a stream of data is essentially a collection of statistics about that stream of data. This collection of statistics does such a good job of capturing the information about the stream of data that it actually determines the stream of data uniquely. (Up to something called 'tree-like equivalance' anyway, which is really just a technicality. It's an equivalence relation that matters about as much as two functions being equal almost everywhere. That is to say, not much at all.) The signature transform is a particularly attractive tool in machine learning because it is what we call a 'universal nonlinearity': it is sufficiently rich that it captures every possible nonlinear function of the original stream of data. Any function of a stream is *linear* on its signature. Now for various reasons this is a mathematical idealisation not borne out in practice (which is why we put them in a neural network and don't just use a simple linear model), but they still work very well!
+
+
+*. movement-related cortical potential (MRCP)..observable through EEG along the central and midline electrodes..MRCP components can be seen before movement onset (a slow 0-5Hz readiness potential..early desynchronization in the 10-12Hz frequency band..due to extensive signal noise present in the data, the EEG data were first processed with the PREP pipeline..data were referenced to linked mastoids,bandpass filtered, using an FIR filter implemented in EEGLAB, between 0.1 Hz and 40 Hz, and then downsampled to 128 Hz..
+
+*. tasks:
+	*.  in which a participant detects a single target letter or image in a rapidly refreshing letter or image stream at the same location
+
+*. https://iduntechnologies.com/algorithm-demos , Niura , mobile EEG , Brain-Dasher , smartphone based EEG 
+
+*. slow negative drift of brain activity, the so-called readiness potential (RP).. —at the cortical, subcortical, and peripheral level—is interoceptive signals, for example respiratory or cardiac signals..whether these interoceptive bodily signals impact voluntary action and the RP..
+
+*. each epoch aligned to an event marker..
+
+*. constructing graphs of a network that reflect the direction of information flow,..analyzing these directed graphs using algebraic topology..response to a stimulus can then be represented and studied as a time series of a functional graph..
+
+*. Table 2 of EEGNet paper on its layers and shapes
+
+*. which EEG input features (timepoints/channels) 
+
+*. reshape these to send to EEGNet et al and a Signature Transform 
+	*. BCI Challenge @ NER 2015, BCI-IDUN, MIT-BCI Hackathon 
+
+*. PSCs (postsynaptic currents), APs (action potentials), afterpolarizations, presynaptic activity
+
+*. tools
+	*. https://github.com/BCI-I/BCII-IDUN-Challenge-tutorials
+	*. https://github.com/BCI-I/MIT-BCI-Hackathon.git: winning entry in tutorials
+	*.  
+
+*. how task performance was predicted by the dynamics of three well-known EEG signals: limb-selective motor preparation in the mu/beta band (8–30 Hz), Contingent Negative Variation (CNV),and Centro-Parietal Positivity (CPP) evidence accumulation signal
+
+*. SMART: pre-processing EEG 
+		*. second-order blind source separation to find sources that were uncorrelated in time (hence second-order). 
+		*. semi-automatic web-based tool (or SMART) to identify non-neural sources of artifact (e.g., muscular artifact, ocular artifact, and  interference by power lines)..
+
+*. which electrodes used for RP computation
+
+*. Postprocessing consists of 4 steps:
+A. MR artifact removal (uses a template to remove gradient-induced artifacts)
+B. Band-pass filtering (our usual default if 0.3 Hz – 50 Hz).
+C. BCG denoising (uses PPG triggers and Optimal Basis Set algorithm).
+D. Export Simple Binary (generates a raw file that can be read by standard EEG processing software such as EEGLab)
+
+*. motor imagery takes place in the sensorimotor cortex and is characterised by the mu-beta event-related (de)-synchronization..
+
+*. https://mne.tools/stable/auto_examples/io/read_xdf.html#sphx-glr-auto-examples-io-read-xdf-py crashes on render.. Qt platform plugin.. thread terminates prematurely..
+
+*. Ensemble learning could be employed to combine the covariance-based features and the signature-based features to further
+boost classification accuracy..
+
+*. Frequency that a channel appears in the top 10 largest elements of the first (a) and second (b) leading eigenvectors of the lead matrix..lead-lag matrix (ordering of ?)
+
+*. EEG signal is embedded into the phase space using the time delay embedding..
+
+*. giotto-tda computes persistence diagrams..
+
+*. decompose EEG signal as a weighted sum over the eigenvectors of the Laplacian (spatial viewpoint)..path signatures (temporal viewpoint) 
+
+*. sensorimotor cortex is activated during motor task performance as well as motor imagery..decrease in power in the
+mu band (7-12 Hz), beta band (12-25 Hz) in an ERD followed by a beta rebound in the ERS..
+
+*. sliding window of 0.2s over epoch of 2s to extract spectral power in each frequency band..e.g of frequency band: alpha and beta, 1-40 Hz...
+
+*. see how/where Xiaoqi Xu applies BSS via ICA to remove artefacts..
+
+*. Log-Euclidean metric provides a fast approximation when the data are concentrated with respect to the
+curvature..affine-invariant metric used in medical imaging..preprocessing steps applied to these datasets through
+the chapters are band-pass filter..
+
+*. Short step-like deflections (especially in frontal EEG channels) due to eye movements, Large transient deflections (especially in frontal EEG channels) due to blinking, Brief bursts of high frequency fluctuations across several channels due to the muscular activity during swallowing, AC power line frequency (typically 50 or 60 Hz), Brief signal jumps due to building vibration (such as a door slamming), Electromagnetic field noise from nearby elevators, cell phones, the geomagnetic field etc, Electromagnetic interference from stimulus presentation (such as EEG sensors picking up the field generated by unshielded headphones), Continuous oscillations at specific frequencies used by head position indicator (HPI) coils, Random high-amplitude fluctuations (or alternatively, constant zero signal) in a single channel due to sensor malfunction (e.g., in surface electrodes, poor scalp contact)
+
+	*. entire data during the resting state and the task were cut into 2 s non-overlapping epochs, filtered into the 1-40 Hz frequency band, and down-sampled to 250 Hz..artefacts (muscle, heart, eye movement) removed via SOBI (2nd order blind source separation)..filtered into the 1-40 Hz frequency band, and down-sampled to 250 Hz to further remove muscle artefacts.. 
+
+*. signals of three frontal electrodes (pre-frontal 1, pre-frontal 2 and mid-frontal in the 10–20 system) were averaged to reduce local fluctuations 
+
+*. rtsBCI: A real-time BCI system implemented in Matlab and Simulink..
+
+*. path of covariance matrices inside a 0.2s sliding window with 100 time steps would be discriminitory..
+
+*. [s, h] = sload(’A01T.gdf’) 
+
+*. what are the key ideas in each slide
+
+	*. (slide - library) PyRiemann 
+
+	*. (slide - library) MNE
+
+	*. (slide - plumbing) OpenViBE plugins
+
+	*. (slide - method) 
+		*. Integrated Systems Laboratory, ETH:Michael Hersche∗, Tino Rellstab∗, Pasquale Davide Schiavone∗, Lukas Cavigelli∗, Luca Benini∗‡, Abbas Rahimi*
+			*.  
+
+	*. (slide - method) adapting audio classification methods to EEG 
+
+	*. (slide - method) EEG -> path signatures -> feature vectors -> SVM et al
+		*. properties of path signatures
+		*. diagram from Xiaoqi Xu 
+
+	*. (slide - method) EEG -> SPD/covariance matrices -> Riemann Classifier  
+		*. description from 'Large Multiscale Temporal and Spectral Features'
+		*. diagram of hemisphere and tangent plane
+
+	*. (slide - method) EEGNet, Deep Signature Transform, et al
+		*. diagram
+
+	*. (slide - methods table) To preprocess and identify RP second derivative on stimuli onset 
+		*. key ideas, key snippets
+
+	*. (slide - method) PaSST, LEAP audio processing -> EEG classification 
+
+	*. (x slide - use cases)
+		*. smartphone-based EEG, mobile EEG, Brain-Dasher
+
+	*. (slide - preprocessing)
+		*. reduce PSF & CTF from volume conduction 
+		*. bandpass filter 
+		*. PCA/ICA - see if there's a difference
+		*. baseline correction 
+	
+	*. (slide - visualizations)
+		*. ERDS/ERP topomap of epoch
+		*. SPD cov heatmap plot per epoch 
+		*. time course time series plot over event duration of electrodes along center line near back of scalp
+		*. persistence diagrams of birth/death of barcodes
+
+	*. (slide - conclusion)
+
+*. to resume: Peter Foster's Notebook on path signatures, 
+
+*. Voluntary hand or foot movements are preceded by a slowly increasing surface-negative cortical potential of 10-15 μV..
+
+*. TCP Tagging 
+	*. https://openvibe.inria.fr/tcp-tagging/
+
+*. reconcile with trialan/eeg on reproducing the plot in the paper..
+
+*. downsampled to 512 Hz, bandpass filtered between 0.1 and 40 Hz..after epoching (−4 to 1s regarding the movement onset), trials showing excessive noise (i.e., > 3 SD) were excluded..after artifact correction, epochs were averaged in each subject to compute the RP.. electrodes that showed the highest RP amplitude among fronto-central electrodes (i.e., Cz, FCz, Fz, AFz)
+
+*. https://physionet.org/content/eegmmidb/1.0.0/ 
+	*. 1500 one- and two-minute EEG recordings, obtained from 109 subjects
+
+*. (Claude 3.5 Sonnet) Common Spatial Patterns (CSP) and the Laplacian are both spatial filtering techniques used in EEG analysis, but they serve different purposes and work differently:
+
+Common Spatial Patterns:
+- Supervised method that maximizes the variance between two conditions
+- Learns spatial filters that best discriminate between two classes of EEG signals
+- Commonly used for motor imagery classification
+- Optimizes spatial filters based on the covariance matrices of two classes
+- Data-driven approach that depends on labeled training data
+- Results in filters that maximize the difference in variance between conditions
+
+Surface Laplacian (also called Current Source Density):
+- Unsupervised spatial filtering technique
+- Estimates the *radial* current flow at the scalp
+- Reduces volume conduction effects
+- Acts like a high-pass spatial filter
+- Based on the second spatial derivative of the potential distribution
+- Independent of experimental conditions or classes
+- Primarily used to increase spatial resolution and reduce reference effects
+
+Their relationship:
+1. Both are spatial filters that can improve signal quality
+2. Both can enhance local activity
+3. Laplacian is fixed/predetermined, while CSP is learned from the data
+4. CSP optimizes for discrimination, Laplacian optimizes for spatial resolution
+5. Can be used together: Laplacian as preprocessing before CSP
+
+The key difference is their purpose:
+- Laplacian: Improves spatial resolution and reduces volume conduction
+- CSP: Optimizes discrimination between different mental states/conditions
+
+*. https://mne.tools/mne-lsl/stable/resources/install.html
+	*. sudo apt install -y libpugixml-dev qt6-base-dev freeglut3-dev
+	*.  
+
+*. 90 epochs of 33127 (tmin=-2,tmax=0) (tmin=,tmax=)
+	*. inter-event timespan > 2s must hold (check with Andrei, Yun Da)
+	*. event_dict: {'255': 1, '33124': 2, '33126': 3, '33127': 4, '33132': 5, '33289': 6, '33296': 7}
+
+
+*. Bastian Rieck et al 
+*. Xiaoqi Xu et al 
+*. Thoriri
+*. trialan
+
+*. 'standard_1005' 'standard_1020'
+*. https://mne.tools/stable/auto_tutorials/io/20_reading_eeg_data.html#sphx-glr-auto-tutorials-io-20-reading-eeg-data-py
+https://mne.tools/stable/auto_examples/decoding/decoding_csp_timefreq.html#sphx-glr-auto-examples-decoding-decoding-csp-timefreq-py
+https://mne.tools/stable/auto_examples/time_frequency/time_frequency_erds.html#sphx-glr-auto-examples-time-frequency-time-frequency-erds-py
+*. towards a coherent navigable atlas 
+*. easy reusability by anyone
+*. features from path signatures and persistent homology 
+
+*. reproducing relevant algorithms from He Bin et al ~ Maoz's spiking neurons, Seb Will's spiking neurons
+
+*. FP1, FP2, FC6, FC2, FC1, FC5, Fz, C4, Cz,C3, P4, Pz, P3, O2, Oz, O1
+
+*. support@eemagine.com 
+	*. topomap <-> GDF labels
+
+*. reinforcement learning in a pain control system
+
+(4 Jul)
+*. 10ms intervals: good for P300 ERPs but can't reliably detect slow ramping signals or beta desynchronization which occur over .. 
+*. not ideal for slow ramping signal detection
+*. sampling rate too high
+*. noise too much in too short an interval ? e.g muscle artefacts 
+*. CSP+LDA Accuracy: 0.937, FgMDM Accuracy: 0.784
+power_target:[6.62467571e-08 1.00195458e-07 1.26774738e-07 1.86684191e-06
+ 1.32922410e-06 2.12185059e-07 1.29100416e-07 5.36285792e-08
+ 1.82323412e-08 1.76322632e-07]
+power_nontarget:[2.44660392e-08 3.62852965e-08 8.89262557e-08 6.17102960e-08
+ 6.10501191e-08 6.43296058e-09 1.35009821e-08 3.93534742e-08
+ 4.53185969e-09 2.58218290e-08]
+*. feature types (power spread over spatial eigenvectors based on scalp manifold, 
+*. refactoring the pipeline out of OpenViBE -> architecture diagram of pipeline 
+    *. standard filters 
+*. huge difference between subjects:
+    *. train over all subjects' self paced voluntary movements before test on specific subject
+*. .resample , dimensionality reduction via surface laplacian , 
+*.  signal processing methods section that prove promising
+*.  parallelization of real time classification e.g (morlet) wavelet convolution, 
+*.  classifying every 100ms is too short ? sampling rate too high ? wouldn't we miss slow rampling signals like that ?
+*. training over multiple subjects 
+*. baseline correction 
+
+*. t-SNE clustering of path signature features of target vs nontarget epochs
+
+*. check mit.edu, cam.ac.uk, ox.ac.uk, caltech.edu use the key snippets
+
+*. data matrix of target epochs as rows, columns are features (path signature, first 10 spatial eigenvectors of surface Laplacian from Laplace-Beltrami operator, time-frequency decomposition over [1,40]HZ)
+
+*. SPD covariance matrices at each 200ms subinterval of a 9000ms interval are the nodes 
+	*. ripser
+	*. GUDHI
+
+*. path signature of lead-lag matrices over 9000ms interval ()
+
+*. how can i implement a real time classification pipeline reading from a 64 channel eego ant neuro system for a single trial subject performing a libet-like self paced task based on an ensemble of the laplacian, path signatures and tda as given in https://depozit.isae.fr/theses/2023/2023_Xu_Xiaoqi.pdf alongside traditional csp+lda and riemann classification ? how do i implement a coherent classification pipeline that uses all the cores of a cpu and a geforce rtx 4050 optimally ? the system would communicate over mne-lsl. do i need to implement the pipeline in c ? give me testable end to end codebase 
