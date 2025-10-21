@@ -23,6 +23,7 @@ from sklearn.utils import shuffle
 from pyriemann.estimation import Covariances
 from pyriemann.classification import MDM, TSclassifier
 import joblib
+import pickle
 
 motor_channels=['Fz','FCz','Pz','C3','C4','T7','T8']
 
@@ -236,6 +237,95 @@ def compute_cotangent_matrix(pos, tri):
         M[j, j] += weight
     
     return M.tocsc()
+
+def preprocess_N(base_gdf, other_gdf=None, extra_gdfs=None, ced_file='na-265.csv', target_event=None, nontarget_event=None, n_components=10):
+    """
+    Load electrode montage, compute Laplace-Beltrami eigenvectors, and load/concatenate
+    one or more GDF files in a uniform way.
+
+    Parameters
+    - base_gdf: str or list[str]
+        Path or list of paths to primary GDF file(s).
+    - other_gdf: str or list[str], optional
+        Additional GDF file or list of files to include.
+    - extra_gdfs: list[str], optional
+        Extra GDF files to include (convenience argument).
+    - ced_file: str
+        Electrode coordinate CSV file.
+    - target_event: dict
+        Event id mapping for target trials (passed to mne.Epochs).
+    - nontarget_event: dict
+        Event id mapping for non-target trials.
+    - n_components: int
+        Number of Laplace eigenvectors to compute / keep.
+    Returns
+    - target_epochs, nontarget_epochs, montage, phi, eigenvalues, labels
+    """
+    # Build a flat list of files (support str, list, tuple)
+    files = []
+    def _extend_files(x):
+        if x is None:
+            return
+        if isinstance(x, (list, tuple)):
+            files.extend(x)
+        else:
+            files.append(x)
+
+    _extend_files(base_gdf)
+    _extend_files(other_gdf)
+    _extend_files(extra_gdfs)
+
+    if len(files) == 0:
+        raise ValueError("No GDF files provided to preprocess().")
+
+    # Load montage and compute Laplace-Beltrami basis
+    montage, correct_labels, ch_names, pos = load_electrode_coordinates(ced_file)
+
+    start_preproc = time.time()
+    phi, eigenvalues = compute_laplace_beltrami(pos, n_components)
+    end_preproc = time.time()
+    print(f"compute_laplace_beltrami: {end_preproc - start_preproc:.2f} seconds")
+
+    # Load each file, preprocess and extract epochs
+    target_epochs_list = []
+    nontarget_epochs_list = []
+    for f in files:
+        try:
+            raw = load_preprocess_gdf(f, correct_labels, montage)
+        except Exception as e:
+            print(f"[preprocess] Failed to load {f}: {e}")
+            continue
+
+        # Extract target and nontarget epochs if event mappings provided
+        if target_event is not None:
+            try:
+                ep_t = extract_epochs(raw, target_event)
+                if len(ep_t) > 0:
+                    target_epochs_list.append(ep_t)
+            except Exception as e:
+                print(f"[preprocess] No target epochs extracted from {f}: {e}")
+
+        if nontarget_event is not None:
+            try:
+                ep_nt = extract_epochs(raw, nontarget_event)
+                if len(ep_nt) > 0:
+                    nontarget_epochs_list.append(ep_nt)
+            except Exception as e:
+                print(f"[preprocess] No nontarget epochs extracted from {f}: {e}")
+
+    # Concatenate collected epochs (if any)
+    if len(target_epochs_list) == 0:
+        raise RuntimeError("No target epochs found across provided GDF files.")
+    if len(nontarget_epochs_list) == 0:
+        raise RuntimeError("No nontarget epochs found across provided GDF files.")
+
+    target_epochs = mne.concatenate_epochs(target_epochs_list)
+    nontarget_epochs = mne.concatenate_epochs(nontarget_epochs_list)
+
+    n_target = len(target_epochs)
+    n_nontarget = len(nontarget_epochs)
+    labels = np.concatenate([np.ones(n_target, dtype=int), np.zeros(n_nontarget, dtype=int)])
+    return target_epochs, nontarget_epochs, montage, phi, eigenvalues, labels
 
 def preprocess(base_gdf, other_gdf, ced_file, target_event, nontarget_event, n_components=10):
     montage, correct_labels, ch_names, pos = load_electrode_coordinates(ced_file)
@@ -525,6 +615,17 @@ def classify_wavelet_power(target_epochs, nontarget_epochs, picks=None, freqs=np
     )
     save_classifier(clf, scaler, prefix)
     print(f"[classify_wavelet_power] Mean accuracy: {np.mean(accs):.3f}")
+    # Collect all test indices, true labels, and predictions
+    all_test_idx, all_true, all_pred = [], [], []
+    for train_idx, test_idx in skf.split(X_scaled, y):
+        clf.fit(X_scaled[train_idx], y[train_idx])
+        y_pred = clf.predict(X_scaled[test_idx])
+        all_test_idx.extend(test_idx)
+        all_true.extend(y[test_idx])
+        all_pred.extend(y_pred)
+    TP, TN, FP, FN = analyze_classification_outcomes(
+        np.array(all_true), np.array(all_pred), np.array(all_test_idx), prefix=prefix
+    )
     return np.mean(accs), mis_idx, correct_idx, mis_fif, correct_fif
 
 def classify_laplacian_csp_lda(target_epochs, nontarget_epochs, phi, n_components=10, prefix="laplacian_csp"):
@@ -553,6 +654,17 @@ def classify_laplacian_csp_lda(target_epochs, nontarget_epochs, phi, n_component
     )
     save_classifier(clf, scaler, prefix)
     print(f"[classify_laplacian_csp_lda] Mean accuracy: {np.mean(accs):.3f}")
+    # Collect all test indices, true labels, and predictions
+    all_test_idx, all_true, all_pred = [], [], []
+    for train_idx, test_idx in skf.split(X_scaled, labels):
+        clf.fit(X_scaled[train_idx], labels[train_idx])
+        y_pred = clf.predict(X_scaled[test_idx])
+        all_test_idx.extend(test_idx)
+        all_true.extend(labels[test_idx])
+        all_pred.extend(y_pred)
+    TP, TN, FP, FN = analyze_classification_outcomes(
+        np.array(all_true), np.array(all_pred), np.array(all_test_idx), prefix=prefix
+    )
     return np.mean(accs), mis_idx, correct_idx, mis_fif, correct_fif
 
 def classify_laplacian_fgmdm(target_epochs, nontarget_epochs, phi, n_components=10, prefix="laplacian_fgmdm"):
@@ -582,6 +694,17 @@ def classify_laplacian_fgmdm(target_epochs, nontarget_epochs, phi, n_components=
     )
     save_classifier(clf, None, prefix)
     print(f"[classify_laplacian_fgmdm] Mean accuracy: {np.mean(accs):.3f}")
+    # Collect all test indices, true labels, and predictions
+    all_test_idx, all_true, all_pred = [], [], []
+    for train_idx, test_idx in skf.split(covs, labels):
+        clf.fit(covs[train_idx], labels[train_idx])
+        y_pred = clf.predict(covs[test_idx])
+        all_test_idx.extend(test_idx)
+        all_true.extend(labels[test_idx])
+        all_pred.extend(y_pred)
+    TP, TN, FP, FN = analyze_classification_outcomes(
+        np.array(all_true), np.array(all_pred), np.array(all_test_idx), prefix=prefix
+    )
     return np.mean(accs), mis_idx, correct_idx, mis_fif, correct_fif
 
 def save_epochs_by_indices(epochs, mis_idx, correct_idx, prefix="epochs"):
@@ -618,12 +741,164 @@ def save_epochs_and_labels_by_indices(epochs, labels, mis_idx, correct_idx, pref
     print(f"[save_epochs_and_labels_by_indices] Saved {len(mis_idx)} misclassified and {len(correct_idx)} correct epochs and labels.")
     return mis_fif, correct_fif, mis_labels_file, correct_labels_file
 
+def analyze_classification_outcomes(y_true, y_pred, test_indices, prefix=""):
+    """
+    Separate and count TP, TN, FP, FN for test indices.
+    Visualize as a bar plot.
+    """
+    TP, TN, FP, FN = [], [], [], []
+    for idx, true, pred in zip(test_indices, y_true, y_pred):
+        if true == 1 and pred == 1:
+            TP.append(idx)
+        elif true == 0 and pred == 0:
+            TN.append(idx)
+        elif true == 0 and pred == 1:
+            FP.append(idx)
+        elif true == 1 and pred == 0:
+            FN.append(idx)
+    counts = {'TP': len(TP), 'TN': len(TN), 'FP': len(FP), 'FN': len(FN)}
+    print(f"[{prefix}] Counts: {counts}")
+    # Visualization
+    plt.figure(figsize=(5,3))
+    plt.bar(counts.keys(), counts.values(), color=['g','b','r','orange'])
+    plt.title(f"{prefix} Classification Outcomes")
+    plt.ylabel("Count")
+    plt.tight_layout()
+    plt.savefig(f"{prefix}_classification_outcomes.png")
+    plt.show()
+    return TP, TN, FP, FN
+
+# 1. to 6. Train and save an MDM model for real-time use
+def train_and_save_mdm_model(target_epochs, nontarget_epochs, model_path="mdm-model.pkl", reg=1e-6):
+    """
+    1. Concatenate target and nontarget epochs.
+    2. Assign labels (1 for target, 0 for nontarget).
+    3. Extract data and compute covariance matrices.
+    4. (Optional) Regularize covariance matrices.
+    5. Fit MDM classifier.
+    6. Save the model (covariances and labels) to a pickle file.
+    """
+    # 1 & 2
+    n_target = len(target_epochs)
+    n_nontarget = len(nontarget_epochs)
+    labels = np.concatenate([np.ones(n_target, dtype=int), np.zeros(n_nontarget, dtype=int)])
+    all_epochs = mne.concatenate_epochs([target_epochs, nontarget_epochs])
+    # 3
+    X = all_epochs.get_data() * 1e6  # (n_epochs, n_channels, n_times)
+    covs = Covariances().fit_transform(X)
+    # 4
+    covs += reg * np.eye(X.shape[1])[None, :, :]
+    # 5
+    mdm = MDM()
+    mdm.fit(covs, labels)
+    # 6
+    trained = {'COV': covs, 'Labels': labels}
+    with open(model_path, "wb") as f:
+        pickle.dump(trained, f)
+    print(f"[train_and_save_mdm_model] Saved MDM model to {model_path}")
+    return mdm
+
+#Jason: merge with extract_gdf_event_ids 
+def print_gdf_event_counts(file_path, top_n=None, verbose=True):
+    """
+    Read a GDF and print annotation descriptions (event ids) and their occurrence counts.
+    Returns a collections.Counter of annotations.
+    Parameters:
+      - file_path: path to .gdf file
+      - top_n: if set, only print the top_n most frequent events
+      - verbose: if False, do not print (still returns the Counter)
+    """
+    from collections import Counter
+    try:
+        raw = mne.io.read_raw_gdf(file_path, preload=False, verbose='error')
+    except Exception as e:
+        print(f"[print_gdf_event_counts] Failed to read {file_path}: {e}")
+        return Counter()
+
+    ann = raw.annotations
+    if ann is None or len(ann.description) == 0:
+        if verbose:
+            print(f"[print_gdf_event_counts] No annotations found in {file_path}")
+        return Counter()
+
+    counts = Counter(ann.description)
+
+    # Try to obtain the mapping from annotation description -> integer event code
+    try:
+        _, event_id_map = mne.events_from_annotations(raw)
+    except Exception:
+        event_id_map = {}
+
+    # Prepare sorted display by frequency
+    items = sorted(counts.items(), key=lambda x: -x[1])
+    if top_n:
+        items = items[:top_n]
+
+    if verbose:
+        print(f"[print_gdf_event_counts] File: {file_path}")
+        for desc, cnt in items:
+            code = event_id_map.get(desc, None)
+            print(f"  {desc!r}: count={cnt}, event_code={code}")
+    return counts
+#Jason: merge with print_gdf_event_counts 
+def extract_gdf_event_ids(file_path, verbose=False):
+    """
+    Read a GDF and extract event ids (trial markers) and their occurrence counts.
+
+    Returns:
+      counts: collections.Counter keyed by integer event codes (events[:,2])
+      event_id_map: dict mapping annotation description -> integer event code
+    """
+    from collections import Counter
+    try:
+        raw = mne.io.read_raw_gdf(file_path, preload=False, verbose='error')
+    except Exception as e:
+        if verbose:
+            print(f"[extract_gdf_event_ids] Failed to read {file_path}: {e}")
+        return Counter(), {}
+
+    # Try to convert annotations to events (this yields integer event codes)
+    try:
+        events, event_id_map = mne.events_from_annotations(raw)
+        if events.size == 0:
+            if verbose:
+                print(f"[extract_gdf_event_ids] No events found in {file_path}")
+            return Counter(), event_id_map
+        counts = Counter(events[:, 2].astype(int))
+        if verbose:
+            # Create a human-friendly mapping of code -> description
+            inv = {v: k for k, v in event_id_map.items()}
+            print(f"[extract_gdf_event_ids] File: {file_path}")
+            for code, cnt in counts.most_common():
+                desc = inv.get(code, str(code))
+                print(f"  {desc!r} (code={code}): count={cnt}")
+        return counts, event_id_map
+    except Exception as e:
+        # Fallback: count annotation descriptions directly if events_from_annotations fails
+        ann = raw.annotations
+        if ann is None or len(ann.description) == 0:
+            if verbose:
+                print(f"[extract_gdf_event_ids] No annotations found in {file_path}")
+            return Counter(), {}
+        counts_desc = Counter(ann.description)
+        if verbose:
+            print(f"[extract_gdf_event_ids] File: {file_path} (fallback counting descriptions)")
+            for desc, cnt in counts_desc.most_common():
+                print(f"  {desc!r}: count={cnt}")
+        return counts_desc, {}
+    
+# Example usage in your pipeline:
+# mdm = train_and_save_mdm_model(target_epochs, nontarget_epochs, model_path="mdm-model.pkl")
 
 if __name__ == '__main__':
     ced_file = "na-265.csv"
     base_gdf = "data/Andrei.gdf"
     other_gdf = 'data/YunDa-90KeyPresses/rp-train-[2025.04.25.4.14pm]_90_keyPresses.gdf'
+    yet_other_gdf = 'data/rp-train-[2025.07.16-14.19.00].gdf'
+    
     target_epochs, nontarget_epochs, montage, phi, eigenvalues, labels = preprocess(base_gdf, other_gdf, ced_file, target_event={'33127':4}, nontarget_event={'33124':2}, n_components=10)
+    print_gdf_event_counts(yet_other_gdf)
+    extract_gdf_event_ids(yet_other_gdf, verbose=True)
 
     wavelet_acc, wavelet_mis_idx, wavelet_correct_idx, wavelet_mis_fif, wavelet_correct_fif = classify_wavelet_power(target_epochs, nontarget_epochs, picks=motor_channels, prefix="wavelet")
     print(f"Wavelet Power Accuracy: {wavelet_acc:.3f}")
@@ -635,5 +910,16 @@ if __name__ == '__main__':
     # Laplacian FgMDM
     lap_fgmdm_acc, lap_fgmdm_mis_idx, lap_fgmdm_correct_idx, lap_fgmdm_mis_fif, lap_fgmdm_correct_fif = classify_laplacian_fgmdm(target_epochs, nontarget_epochs, phi, n_components=10, prefix="laplacian_fgmdm")
     print(f"Laplacian FgMDM Accuracy: {lap_fgmdm_acc:.3f}")
-    
-    
+
+    #untested as of 15/10/2025
+    scalp_maps_t, times_t = reconstruct_global_topomaps(target_epochs, phi, n_components=10, tmin=0.0, tmax=0.2)
+    scalp_maps_nt, times_nt = reconstruct_global_topomaps(nontarget_epochs, phi, n_components=10, tmin=0.0, tmax=0.2)
+    # Average over epochs
+    mean_map_t = scalp_maps_t.mean(axis=0)  # (n_times_window, n_channels)
+    mean_map_nt = scalp_maps_nt.mean(axis=0)
+    # Plot at a specific time index
+    mne.viz.plot_topomap(mean_map_t[0], target_epochs.info, show=True)
+
+
+
+

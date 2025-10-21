@@ -91,12 +91,23 @@ def stream_eeg_lsl(
     n_channels=8,
     log_file="lsl_stream_log.csv"
 ):
+    """
+    Stream from an LSL EEG source using mne-realtime (mne-lsl). This implementation uses
+    mne_realtime.LSLClient to retrieve blocks of samples and passes fixed-size buffers
+    to the classifier function.
+    """
     classifier_args = classifier_args or {}
-    print("Looking for an EEG stream on LSL...")
-    streams = resolve_stream('type', 'EEG')
-    inlet = StreamInlet(streams[0])
+
+    try:
+        from mne_realtime import LSLClient
+    except Exception as e:
+        raise RuntimeError("mne_realtime (mne-lsl) is required for LSL streaming. Install with: pip install mne-realtime") from e
+
+    print("Connecting to LSL stream via mne_realtime.LSLClient (mne-lsl)...")
+    # Create an LSL client that listens for an EEG stream. By default it will resolve by type='EEG'.
+    client = LSLClient(name=None, type='EEG', timeout=1.0)
+
     buffer_samples = int(buffer_ms / 1000 * sfreq)
-    eeg_buffer = np.zeros((n_channels, 0))
     print(f"Receiving LSL stream: {n_channels} channels, buffer size: {buffer_samples} samples ({buffer_ms} ms)")
 
     with open(log_file, "w", newline='') as csvfile:
@@ -104,19 +115,28 @@ def stream_eeg_lsl(
         writer.writerow(["timestamp", "buffer_start", "buffer_stop", "prediction"])
         sample_count = 0
         while True:
-            chunk, timestamps = inlet.pull_chunk(timeout=1.0)
-            if chunk:
-                chunk = np.array(chunk).T  # shape: (n_channels, n_samples)
-                eeg_buffer = np.concatenate((eeg_buffer, chunk), axis=1)
-                while eeg_buffer.shape[1] >= buffer_samples:
-                    buffer_data = eeg_buffer[:, :buffer_samples]
-                    eeg_buffer = eeg_buffer[:, buffer_samples:]
-                    buffer_data = buffer_data[np.newaxis, :, :]
-                    pred = classifier_func(buffer_data, **classifier_args)
-                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
-                    writer.writerow([timestamp, sample_count, sample_count + buffer_samples, int(pred[0])])
-                    print(f"[{timestamp}] Buffer {sample_count}:{sample_count + buffer_samples} Prediction: {pred[0]}")
-                    sample_count += buffer_samples
+            # Request exactly buffer_samples; get_data may block until that many samples have arrived.
+            data = client.get_data(buffer_samples)
+            if data is None or data.size == 0:
+                # nothing received, wait a bit
+                time.sleep(0.01)
+                continue
+
+            # Ensure shape is (n_channels, n_samples)
+            if data.shape[0] != n_channels and data.shape[1] == n_channels:
+                data = data.T
+
+            # If more than buffer_samples were returned, process in sliding chunks
+            cur_idx = 0
+            while data.shape[1] - cur_idx >= buffer_samples:
+                chunk = data[:, cur_idx:cur_idx + buffer_samples]
+                cur_idx += buffer_samples
+                buffer_data = chunk[np.newaxis, :, :]  # (1, n_channels, buffer_samples)
+                pred = classifier_func(buffer_data, **classifier_args)
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+                writer.writerow([timestamp, sample_count, sample_count + buffer_samples, int(pred[0])])
+                print(f"[{timestamp}] Buffer {sample_count}:{sample_count + buffer_samples} Prediction: {pred[0]}")
+                sample_count += buffer_samples
 
 # Example usage:
 if __name__ == "__main__":

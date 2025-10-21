@@ -1,0 +1,276 @@
+JasonWongYH: extend the code to separate out and count which target/nontarget epochs were classified correctly/incorrectly for the test data points (indices) . visualize the false positives, false negatives, true positives, true negatives for the test data points (indices)
+
+GitHub Copilot: To extend your code for detailed classification outcome analysis and visualization, you can:
+
+1. **Count and separate TP, TN, FP, FN indices** for each classifier.
+2. **Visualize** the distribution of these outcomes (e.g., as a bar plot or confusion matrix).
+
+Below is a function to compute and visualize these for a given classifier's results.  
+You can call this after each classifier (wavelet, Laplacian CSP, Laplacian FgMDM).
+
+````python
+import matplotlib.pyplot as plt
+from collections import Counter
+
+def analyze_classification_outcomes(y_true, y_pred, test_indices, prefix=""):
+    """
+    Separate and count TP, TN, FP, FN for test indices.
+    Visualize as a bar plot.
+    """
+    TP, TN, FP, FN = [], [], [], []
+    for idx, true, pred in zip(test_indices, y_true, y_pred):
+        if true == 1 and pred == 1:
+            TP.append(idx)
+        elif true == 0 and pred == 0:
+            TN.append(idx)
+        elif true == 0 and pred == 1:
+            FP.append(idx)
+        elif true == 1 and pred == 0:
+            FN.append(idx)
+    counts = {'TP': len(TP), 'TN': len(TN), 'FP': len(FP), 'FN': len(FN)}
+    print(f"[{prefix}] Counts: {counts}")
+    # Visualization
+    plt.figure(figsize=(5,3))
+    plt.bar(counts.keys(), counts.values(), color=['g','b','r','orange'])
+    plt.title(f"{prefix} Classification Outcomes")
+    plt.ylabel("Count")
+    plt.tight_layout()
+    plt.savefig(f"{prefix}_classification_outcomes.png")
+    plt.show()
+    return TP, TN, FP, FN
+
+# Example usage in a classifier function (add after each classifier's cross-validation loop):
+
+# After the cross-validation loop in classify_wavelet_power, add:
+    # Collect all test indices, true labels, and predictions
+    all_test_idx, all_true, all_pred = [], [], []
+    for train_idx, test_idx in skf.split(X_scaled, y):
+        clf.fit(X_scaled[train_idx], y[train_idx])
+        y_pred = clf.predict(X_scaled[test_idx])
+        all_test_idx.extend(test_idx)
+        all_true.extend(y[test_idx])
+        all_pred.extend(y_pred)
+    TP, TN, FP, FN = analyze_classification_outcomes(
+        np.array(all_true), np.array(all_pred), np.array(all_test_idx), prefix=prefix
+    )
+
+# Do the same for classify_laplacian_csp_lda and classify_laplacian_fgmdm:
+# Replace the cross-validation loop with this pattern to collect all test indices, true labels, and predictions,
+# then call analyze_classification_outcomes at the end.
+````
+
+**Instructions:**
+- Add the `analyze_classification_outcomes` function to your script.
+- In each classifier function, after the cross-validation loop, collect all test indices, true labels, and predictions, then call this function.
+- This will print counts and show/save a bar plot for TP, TN, FP, FN.
+
+Let me know if you want a confusion matrix or more detailed visualizations!
+
+JasonWongYH: extend this with functions that simulate real time eeg streaming via lsl by reading in a gdf file, buffering every 200ms, sending that buffer to a classifier running on the gpu, printing the result with a timestamp so that i can do post-hoc analysis on missed and wrong classifications 
+
+GitHub Copilot: Here’s how you can extend your script to **simulate real-time EEG streaming via LSL** by reading a GDF file, buffering every 200ms, sending each buffer to a classifier (optionally on GPU if your classifier supports it), and printing the result with a timestamp.
+
+Below is a set of functions and a main loop for this simulation.  
+**Note:** This is a simulation; it does not require an actual LSL stream, but mimics the behavior by chunking the GDF file.
+
+````python
+import time
+import numpy as np
+import mne
+import joblib
+from datetime import datetime
+
+def simulate_eeg_stream_gdf(
+    gdf_file, 
+    classifier_func, 
+    classifier_args=None, 
+    buffer_ms=200, 
+    picks=None, 
+    print_results=True
+):
+    """
+    Simulate real-time EEG streaming by reading a GDF file and buffering every buffer_ms milliseconds.
+    Each buffer is sent to the classifier, and the result is printed with a timestamp.
+    """
+    raw = mne.io.read_raw_gdf(gdf_file, preload=True, verbose='error')
+    sfreq = raw.info['sfreq']
+    buffer_samples = int(buffer_ms / 1000 * sfreq)
+    n_samples = raw.n_times
+    ch_names = raw.ch_names if picks is None else picks
+    ch_indices = [raw.ch_names.index(ch) for ch in ch_names]
+    classifier_args = classifier_args or {}
+
+    print(f"Simulating real-time stream from {gdf_file} at {sfreq} Hz, buffer size: {buffer_samples} samples ({buffer_ms} ms)")
+
+    for start in range(0, n_samples - buffer_samples + 1, buffer_samples):
+        stop = start + buffer_samples
+        # shape: (n_channels, buffer_samples)
+        buffer_data, times = raw[ch_indices, start:stop]
+        # shape: (1, n_channels, buffer_samples) for classifier
+        buffer_data = buffer_data[np.newaxis, :, :]
+        # Classifier expects epochs-like shape
+        pred = classifier_func(buffer_data, **classifier_args)
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+        if print_results:
+            print(f"[{timestamp}] Buffer {start}:{stop} Prediction: {pred[0]}")
+        # Simulate real-time delay (optional, comment out for faster simulation)
+        # time.sleep(buffer_ms / 1000.0)
+
+def buffer_to_wavelet_classifier(buffer_data, model_path="wavelet-model.pkl"):
+    # buffer_data: (1, n_channels, n_times)
+    # Create a dummy MNE EpochsArray for feature extraction
+    info = mne.create_info(
+        ch_names=[f"Ch{i}" for i in range(buffer_data.shape[1])],
+        sfreq=256, ch_types="eeg"
+    )
+    epochs = mne.EpochsArray(buffer_data, info)
+    model = joblib.load(model_path)
+    scaler = model['scaler']
+    clf = model['clf']
+    features = extract_wavelet_features(epochs)
+    features_scaled = scaler.transform(features)
+    pred = clf.predict(features_scaled)
+    return pred
+
+def buffer_to_laplacian_csp_classifier(buffer_data, phi, model_path="laplacian_csp-model.pkl", n_components=10):
+    info = mne.create_info(
+        ch_names=[f"Ch{i}" for i in range(buffer_data.shape[1])],
+        sfreq=256, ch_types="eeg"
+    )
+    epochs = mne.EpochsArray(buffer_data, info)
+    model = joblib.load(model_path)
+    scaler = model['scaler']
+    clf = model['clf']
+    features = extract_laplacian_csp_features(epochs, phi, n_components)
+    features_scaled = scaler.transform(features)
+    pred = clf.predict(features_scaled)
+    return pred
+
+def buffer_to_laplacian_fgmdm_classifier(buffer_data, phi, model_path="laplacian_fgmdm-model.pkl", n_components=10):
+    info = mne.create_info(
+        ch_names=[f"Ch{i}" for i in range(buffer_data.shape[1])],
+        sfreq=256, ch_types="eeg"
+    )
+    epochs = mne.EpochsArray(buffer_data, info)
+    model = joblib.load(model_path)
+    clf = model['clf']
+    features = extract_laplacian_fgmdm_features(epochs, phi, n_components)
+    pred = clf.predict(features)
+    return pred
+
+# Example usage:
+if __name__ == "__main__":
+    # Simulate with wavelet classifier
+    simulate_eeg_stream_gdf(
+        gdf_file="data/Andrei.gdf",
+        classifier_func=buffer_to_wavelet_classifier,
+        classifier_args={"model_path": "wavelet-model.pkl"},
+        buffer_ms=200,
+        picks=None  # or specify channel names
+    )
+    # For Laplacian CSP or FgMDM, pass phi and model_path in classifier_args
+    # simulate_eeg_stream_gdf(
+    #     gdf_file="data/Andrei.gdf",
+    #     classifier_func=buffer_to_laplacian_csp_classifier,
+    #     classifier_args={"phi": phi, "model_path": "laplacian_csp-model.pkl", "n_components": 10},
+    #     buffer_ms=200,
+    #     picks=None
+    # )
+````
+
+**How it works:**
+- Reads the GDF file in 200ms chunks.
+- Each chunk is formatted as a single "epoch" and sent to the classifier.
+- Prints the prediction with a timestamp.
+- You can later analyze the printed results for missed/wrong classifications.
+
+**To use GPU:**  
+If your classifier (e.g., a PyTorch model) supports GPU, modify the classifier function to move data/model to CUDA.
+
+Let me know if you want a version that actually streams via LSL, or if you want to log results to a file for later analysis!
+
+JasonWongYH: can i have a separate file for this and a version that log results to a file after simulating real time streaming via lsl as you coded above
+
+GitHub Copilot: Certainly! Here’s a **separate file** (`simulate_eeg_stream.py`) that simulates real-time EEG streaming from a GDF file, buffers every 200ms, classifies each buffer, and logs the results (timestamp, buffer index, prediction) to a CSV file for post-hoc analysis.
+
+You can adapt the classifier function (`buffer_to_wavelet_classifier`, etc.) as needed for your models.
+
+````python
+import time
+import numpy as np
+import mne
+import joblib
+import csv
+from datetime import datetime
+
+def simulate_eeg_stream_gdf(
+    gdf_file,
+    classifier_func,
+    classifier_args=None,
+    buffer_ms=200,
+    picks=None,
+    log_file="stream_log.csv"
+):
+    """
+    Simulate real-time EEG streaming by reading a GDF file and buffering every buffer_ms milliseconds.
+    Each buffer is sent to the classifier, and the result is logged with a timestamp.
+    """
+    raw = mne.io.read_raw_gdf(gdf_file, preload=True, verbose='error')
+    sfreq = raw.info['sfreq']
+    buffer_samples = int(buffer_ms / 1000 * sfreq)
+    n_samples = raw.n_times
+    ch_names = raw.ch_names if picks is None else picks
+    ch_indices = [raw.ch_names.index(ch) for ch in ch_names]
+    classifier_args = classifier_args or {}
+
+    print(f"Simulating real-time stream from {gdf_file} at {sfreq} Hz, buffer size: {buffer_samples} samples ({buffer_ms} ms)")
+    with open(log_file, "w", newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(["timestamp", "buffer_start", "buffer_stop", "prediction"])
+        for start in range(0, n_samples - buffer_samples + 1, buffer_samples):
+            stop = start + buffer_samples
+            buffer_data, times = raw[ch_indices, start:stop]
+            buffer_data = buffer_data[np.newaxis, :, :]
+            pred = classifier_func(buffer_data, **classifier_args)
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+            writer.writerow([timestamp, start, stop, int(pred[0])])
+            print(f"[{timestamp}] Buffer {start}:{stop} Prediction: {pred[0]}")
+            # Optional: simulate real time
+            # time.sleep(buffer_ms / 1000.0)
+
+def buffer_to_wavelet_classifier(buffer_data, model_path="wavelet-model.pkl"):
+    # buffer_data: (1, n_channels, n_times)
+    info = mne.create_info(
+        ch_names=[f"Ch{i}" for i in range(buffer_data.shape[1])],
+        sfreq=256, ch_types="eeg"
+    )
+    epochs = mne.EpochsArray(buffer_data, info)
+    model = joblib.load(model_path)
+    scaler = model['scaler']
+    clf = model['clf']
+    # Use your feature extraction as in your main code
+    features = np.mean(epochs.get_data(), axis=2)  # (n_epochs, n_channels)
+    features_scaled = scaler.transform(features)
+    pred = clf.predict(features_scaled)
+    return pred
+
+# Example usage:
+if __name__ == "__main__":
+    simulate_eeg_stream_gdf(
+        gdf_file="data/Andrei.gdf",
+        classifier_func=buffer_to_wavelet_classifier,
+        classifier_args={"model_path": "wavelet-model.pkl"},
+        buffer_ms=200,
+        picks=None,  # or specify channel names
+        log_file="wavelet_stream_log.csv"
+    )
+````
+
+**How to use:**
+1. Place this file in your project folder.
+2. Adjust `buffer_to_wavelet_classifier` to match your feature extraction pipeline if needed.
+3. Run the script. It will create a CSV log file with timestamped predictions for each buffer.
+
+**You can add similar functions for CSP or FgMDM classifiers** by copying/adapting the classifier function and changing the `classifier_func` and `classifier_args` in the call.
+
+Let me know if you want a version that actually streams via LSL, or if you want to log more details!

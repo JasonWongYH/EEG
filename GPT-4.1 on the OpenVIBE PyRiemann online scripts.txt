@@ -1,0 +1,487 @@
+JasonWongYH: how do the python-Riemann-online* files relate to the simulate_eeg_stream code in terms of simulating a real time eeg stream during a libet-like self paced task where the goal of simulate_eeg_stream is to classify if each 200ms buffer precedes a subject's voluntary act or doesn't
+
+GitHub Copilot: Great question! Here’s how the files relate and differ, especially for your Libet-like, self-paced EEG task:
+
+---
+
+### **1. simulate_eeg_stream.py**
+- **Purpose:**  
+  Simulates a real-time EEG stream by reading a GDF file in 200ms buffers, sending each buffer to a classifier, and logging the prediction with a timestamp.
+- **How it works:**  
+  - Reads the entire EEG recording (e.g., from a self-paced Libet task).
+  - Iterates through the data in fixed-size (e.g., 200ms) windows.
+  - For each window, calls a classifier (e.g., `buffer_to_wavelet_classifier`) to predict a label (e.g., "precedes act" or "doesn't").
+  - Logs the result, simulating what would happen in a real-time BCI system.
+- **Use case:**  
+  **Offline simulation** of real-time classification, useful for testing classifiers and pipelines before deploying to a real-time system.
+
+---
+
+### **2. python-Riemann-online.py & python-Riemann-online-added-serial.py**
+- **Purpose:**  
+  Designed to be used **inside OpenViBE** as a Python scripting box for **real-time online BCI**. They process incoming EEG epochs (from OpenViBE), classify them using a Riemannian geometry-based classifier, and send feedback (visual, sound, or serial commands).
+- **How they work:**  
+  - Receive EEG data in real time from OpenViBE (not from a file).
+  - Apply bandpass filtering, compute covariance matrices, and classify each epoch.
+  - Provide feedback (e.g., plot, beep, or send command to a device).
+  - The `added-serial` version adds serial communication for controlling external hardware (e.g., a wheelchair).
+- **Use case:**  
+  **Online, real-time BCI experiments** where each incoming buffer is classified and feedback is given immediately.
+
+---
+
+### **Relation to Your Libet-like Task**
+- **simulate_eeg_stream.py** is for **offline simulation**:  
+  - You can use it to test how well your classifier can distinguish between "pre-act" and "not-pre-act" buffers, using previously recorded data.
+  - Useful for developing and validating your classifier before running a real-time experiment.
+
+- **`python-Riemann-online*.py`** are for **online, real-time use**:  
+  - They would be used during the actual experiment, processing live EEG data as it comes in, classifying each buffer, and providing feedback or control signals.
+
+---
+
+### **Summary Table**
+
+| File                          | Input Source      | Real-Time? | Use Case                         | Classifier Type         |
+|-------------------------------|------------------|------------|----------------------------------|------------------------|
+| simulate_eeg_stream.py        | GDF file         | Simulated  | Offline simulation, classifier dev| Any (e.g., wavelet, MDM)|
+| python-Riemann-online.py      | OpenViBE stream  | Yes        | Online BCI, real-time feedback   | Riemannian/MDM         |
+| python-Riemann-online-added-serial.py | OpenViBE stream | Yes | Online BCI + hardware control    | Riemannian/MDM         |
+
+---
+
+**In summary:**  
+- Use simulate_eeg_stream.py to simulate and test your classifier on existing data, mimicking real-time streaming.
+- Use the `python-Riemann-online*.py` scripts for actual real-time classification and feedback during experiments.
+
+If you want to use the Riemannian classifier in your simulation, you could adapt the classifier function in simulate_eeg_stream.py to use the same pipeline as in the OpenViBE scripts.
+
+JasonWongYH: extend simulate_eeg_stream to allow me to use the openvibe pipeline in real time with lsl when the need arises for me to test the real time classification system with an ant neuro eeg system
+
+GitHub Copilot: To extend simulate_eeg_stream.py for **real-time classification using LSL** (Lab Streaming Layer) with an ANT Neuro EEG system, you need to:
+
+1. **Add an LSL receiver** to get live EEG data.
+2. **Allow switching between file-based simulation and LSL-based real-time streaming**.
+3. **Reuse your classifier pipeline** (e.g., the OpenViBE/pyRiemann pipeline) for both modes.
+
+Below is a **refactored version** of your script with a new function `stream_eeg_lsl` and a main block that lets you choose between GDF simulation and LSL streaming.
+
+````python
+import time
+import numpy as np
+import mne
+import joblib
+import csv
+from datetime import datetime
+
+# For LSL streaming
+from pylsl import StreamInlet, resolve_stream
+
+def simulate_eeg_stream_gdf(
+    gdf_file,
+    classifier_func,
+    classifier_args=None,
+    buffer_ms=200,
+    picks=None,
+    log_file="stream_log.csv"
+):
+    """
+    Simulate real-time EEG streaming by reading a GDF file and buffering every buffer_ms milliseconds.
+    Each buffer is sent to the classifier, and the result is logged with a timestamp.
+    """
+    raw = mne.io.read_raw_gdf(gdf_file, preload=True, verbose='error')
+    sfreq = raw.info['sfreq']
+    buffer_samples = int(buffer_ms / 1000 * sfreq)
+    n_samples = raw.n_times
+    ch_names = raw.ch_names if picks is None else picks
+    ch_indices = [raw.ch_names.index(ch) for ch in ch_names]
+    classifier_args = classifier_args or {}
+
+    print(f"Simulating real-time stream from {gdf_file} at {sfreq} Hz, buffer size: {buffer_samples} samples ({buffer_ms} ms)")
+    with open(log_file, "w", newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(["timestamp", "buffer_start", "buffer_stop", "prediction"])
+        for start in range(0, n_samples - buffer_samples + 1, buffer_samples):
+            stop = start + buffer_samples
+            buffer_data, times = raw[ch_indices, start:stop]
+            buffer_data = buffer_data[np.newaxis, :, :]
+            pred = classifier_func(buffer_data, **classifier_args)
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+            writer.writerow([timestamp, start, stop, int(pred[0])])
+            print(f"[{timestamp}] Buffer {start}:{stop} Prediction: {pred[0]}")
+            # Optional: simulate real time
+            # time.sleep(buffer_ms / 1000.0)
+
+def stream_eeg_lsl(
+    classifier_func,
+    classifier_args=None,
+    buffer_ms=200,
+    sfreq=256,
+    n_channels=8,
+    log_file="lsl_stream_log.csv"
+):
+    """
+    Receive real-time EEG data from LSL, buffer every buffer_ms milliseconds,
+    classify, and log the result.
+    """
+    classifier_args = classifier_args or {}
+    print("Looking for an EEG stream on LSL...")
+    streams = resolve_stream('type', 'EEG')
+    inlet = StreamInlet(streams[0])
+    buffer_samples = int(buffer_ms / 1000 * sfreq)
+    eeg_buffer = np.zeros((n_channels, 0))
+    print(f"Receiving LSL stream: {n_channels} channels, buffer size: {buffer_samples} samples ({buffer_ms} ms)")
+
+    with open(log_file, "w", newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(["timestamp", "buffer_start", "buffer_stop", "prediction"])
+        sample_count = 0
+        while True:
+            chunk, timestamps = inlet.pull_chunk(timeout=1.0)
+            if chunk:
+                chunk = np.array(chunk).T  # shape: (n_channels, n_samples)
+                eeg_buffer = np.concatenate((eeg_buffer, chunk), axis=1)
+                while eeg_buffer.shape[1] >= buffer_samples:
+                    buffer_data = eeg_buffer[:, :buffer_samples]
+                    eeg_buffer = eeg_buffer[:, buffer_samples:]
+                    buffer_data = buffer_data[np.newaxis, :, :]
+                    pred = classifier_func(buffer_data, **classifier_args)
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+                    writer.writerow([timestamp, sample_count, sample_count + buffer_samples, int(pred[0])])
+                    print(f"[{timestamp}] Buffer {sample_count}:{sample_count + buffer_samples} Prediction: {pred[0]}")
+                    sample_count += buffer_samples
+
+def buffer_to_wavelet_classifier(buffer_data, model_path="wavelet-model.pkl"):
+    # buffer_data: (1, n_channels, n_times)
+    info = mne.create_info(
+        ch_names=[f"Ch{i}" for i in range(buffer_data.shape[1])],
+        sfreq=256, ch_types="eeg"
+    )
+    epochs = mne.EpochsArray(buffer_data, info)
+    model = joblib.load(model_path)
+    scaler = model['scaler']
+    clf = model['clf']
+    # Use your feature extraction as in your main code
+    features = np.mean(epochs.get_data(), axis=2)  # (n_epochs, n_channels)
+    features_scaled = scaler.transform(features)
+    pred = clf.predict(features_scaled)
+    return pred
+
+# Example usage:
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--mode', choices=['gdf', 'lsl'], default='gdf', help='Run in GDF simulation mode or LSL real-time mode')
+    parser.add_argument('--gdf_file', default="data/Andrei.gdf")
+    parser.add_argument('--model_path', default="wavelet-model.pkl")
+    parser.add_argument('--buffer_ms', type=int, default=200)
+    parser.add_argument('--n_channels', type=int, default=8)
+    parser.add_argument('--sfreq', type=int, default=256)
+    parser.add_argument('--log_file', default="stream_log.csv")
+    args = parser.parse_args()
+
+    if args.mode == 'gdf':
+        simulate_eeg_stream_gdf(
+            gdf_file=args.gdf_file,
+            classifier_func=buffer_to_wavelet_classifier,
+            classifier_args={"model_path": args.model_path},
+            buffer_ms=args.buffer_ms,
+            picks=None,  # or specify channel names
+            log_file=args.log_file
+        )
+    elif args.mode == 'lsl':
+        stream_eeg_lsl(
+            classifier_func=buffer_to_wavelet_classifier,
+            classifier_args={"model_path": args.model_path},
+            buffer_ms=args.buffer_ms,
+            sfreq=args.sfreq,
+            n_channels=args.n_channels,
+            log_file=args.log_file
+        )
+````
+
+**Notes:**
+- Install LSL Python API: `pip install pylsl`
+- Adjust `n_channels` and `sfreq` to match your ANT Neuro system.
+- You can swap in your OpenViBE/pyRiemann classifier by replacing `buffer_to_wavelet_classifier` with your own function.
+- Run with `--mode lsl` for real-time LSL streaming, or `--mode gdf` for file simulation.
+
+Let me know if you want the classifier function adapted to use the Riemannian pipeline!
+
+JasonWongYH: extend simulate_eeg_stream to allow me to use the openvibe pipeline in real time with lsl when the need arises for me to test the real time classification system with an ant neuro eeg system. what's the differnce between *online.py and *online-added-serial.py ?
+
+GitHub Copilot: ### 1. **Difference between python-Riemann-online.py and python-Riemann-online-added-serial.py**
+
+- **python-Riemann-online.py**  
+  - Purely for real-time EEG classification in OpenViBE using the PyRiemann pipeline (bandpass filter, covariance, MDM classifier).
+  - Provides visual feedback (matplotlib).
+  - No hardware control.
+
+- **python-Riemann-online-added-serial.py**  
+  - All features of the above **plus**:
+    - Sends classification results as serial commands (e.g., to an Arduino or wheelchair).
+    - Can control external hardware in real time based on classifier output.
+    - Optionally provides sound feedback (beep).
+  - Adds serial port setup and communication logic.
+
+---
+
+### 2. **Extending simulate_eeg_stream.py for Real-Time LSL Streaming with the OpenViBE/PyRiemann Pipeline**
+
+Below is an extension that:
+- Adds an LSL streaming mode for real-time EEG from your ANT Neuro system.
+- Uses a PyRiemann-based classifier function (mirroring your OpenViBE pipeline).
+- Lets you choose between GDF simulation and LSL real-time streaming.
+
+````python
+import time
+import numpy as np
+import mne
+import joblib
+import csv
+from datetime import datetime
+
+# Add these imports for LSL and PyRiemann pipeline
+from pylsl import StreamInlet, resolve_stream
+import pickle
+import pyriemann
+from scipy.signal import butter, sosfiltfilt
+
+def butter_bandpass_filter(data, lowcut, highcut, fs, order):
+    nyq = fs / 2
+    low = lowcut / nyq
+    high = highcut / nyq
+    sos = butter(order, [low, high], btype='band', output='sos')
+    meandat = np.mean(data, axis=1)
+    data = data - meandat[:, np.newaxis]
+    y = sosfiltfilt(sos, data)
+    return y
+
+def buffer_to_riemann_classifier(
+    buffer_data,
+    model_path="mdm-model.pkl",
+    lowbp=8,
+    highbp=30,
+    filterorder=4,
+    sfreq=256,
+    ch_indices=None
+):
+    # buffer_data: (1, n_channels, n_times)
+    # Optionally select channels
+    if ch_indices is not None:
+        buffer_data = buffer_data[:, ch_indices, :]
+    # Bandpass filter
+    filtered = butter_bandpass_filter(buffer_data[0], lowbp, highbp, sfreq, filterorder)
+    filtered = np.expand_dims(filtered, axis=0)  # (1, n_channels, n_times)
+    # Covariance
+    cov = pyriemann.estimation.Covariances().fit_transform(filtered)
+    # Load model
+    with open(model_path, "rb") as f:
+        trained = pickle.load(f)
+    mdm = pyriemann.classification.MDM()
+    mdm.metric = 'Riemann'
+    mdm.fit(trained['COV'], trained['Labels'])
+    pred = mdm.predict(cov)
+    return pred
+
+def simulate_eeg_stream_gdf(
+    gdf_file,
+    classifier_func,
+    classifier_args=None,
+    buffer_ms=200,
+    picks=None,
+    log_file="stream_log.csv"
+):
+    raw = mne.io.read_raw_gdf(gdf_file, preload=True, verbose='error')
+    sfreq = raw.info['sfreq']
+    buffer_samples = int(buffer_ms / 1000 * sfreq)
+    n_samples = raw.n_times
+    ch_names = raw.ch_names if picks is None else picks
+    ch_indices = [raw.ch_names.index(ch) for ch in ch_names]
+    classifier_args = classifier_args or {}
+
+    print(f"Simulating real-time stream from {gdf_file} at {sfreq} Hz, buffer size: {buffer_samples} samples ({buffer_ms} ms)")
+    with open(log_file, "w", newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(["timestamp", "buffer_start", "buffer_stop", "prediction"])
+        for start in range(0, n_samples - buffer_samples + 1, buffer_samples):
+            stop = start + buffer_samples
+            buffer_data, times = raw[ch_indices, start:stop]
+            buffer_data = buffer_data[np.newaxis, :, :]
+            pred = classifier_func(buffer_data, **classifier_args)
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+            writer.writerow([timestamp, start, stop, int(pred[0])])
+            print(f"[{timestamp}] Buffer {start}:{stop} Prediction: {pred[0]}")
+            # Optional: simulate real time
+            # time.sleep(buffer_ms / 1000.0)
+
+def stream_eeg_lsl(
+    classifier_func,
+    classifier_args=None,
+    buffer_ms=200,
+    sfreq=256,
+    n_channels=8,
+    log_file="lsl_stream_log.csv"
+):
+    classifier_args = classifier_args or {}
+    print("Looking for an EEG stream on LSL...")
+    streams = resolve_stream('type', 'EEG')
+    inlet = StreamInlet(streams[0])
+    buffer_samples = int(buffer_ms / 1000 * sfreq)
+    eeg_buffer = np.zeros((n_channels, 0))
+    print(f"Receiving LSL stream: {n_channels} channels, buffer size: {buffer_samples} samples ({buffer_ms} ms)")
+
+    with open(log_file, "w", newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(["timestamp", "buffer_start", "buffer_stop", "prediction"])
+        sample_count = 0
+        while True:
+            chunk, timestamps = inlet.pull_chunk(timeout=1.0)
+            if chunk:
+                chunk = np.array(chunk).T  # shape: (n_channels, n_samples)
+                eeg_buffer = np.concatenate((eeg_buffer, chunk), axis=1)
+                while eeg_buffer.shape[1] >= buffer_samples:
+                    buffer_data = eeg_buffer[:, :buffer_samples]
+                    eeg_buffer = eeg_buffer[:, buffer_samples:]
+                    buffer_data = buffer_data[np.newaxis, :, :]
+                    pred = classifier_func(buffer_data, **classifier_args)
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+                    writer.writerow([timestamp, sample_count, sample_count + buffer_samples, int(pred[0])])
+                    print(f"[{timestamp}] Buffer {sample_count}:{sample_count + buffer_samples} Prediction: {pred[0]}")
+                    sample_count += buffer_samples
+
+# Example usage:
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--mode', choices=['gdf', 'lsl'], default='gdf', help='Run in GDF simulation mode or LSL real-time mode')
+    parser.add_argument('--gdf_file', default="data/Andrei.gdf")
+    parser.add_argument('--model_path', default="mdm-model.pkl")
+    parser.add_argument('--buffer_ms', type=int, default=200)
+    parser.add_argument('--n_channels', type=int, default=8)
+    parser.add_argument('--sfreq', type=int, default=256)
+    parser.add_argument('--log_file', default="stream_log.csv")
+    parser.add_argument('--lowbp', type=int, default=8)
+    parser.add_argument('--highbp', type=int, default=30)
+    parser.add_argument('--filterorder', type=int, default=4)
+    args = parser.parse_args()
+
+    classifier_args = {
+        "model_path": args.model_path,
+        "lowbp": args.lowbp,
+        "highbp": args.highbp,
+        "filterorder": args.filterorder,
+        "sfreq": args.sfreq
+    }
+
+    if args.mode == 'gdf':
+        simulate_eeg_stream_gdf(
+            gdf_file=args.gdf_file,
+            classifier_func=buffer_to_riemann_classifier,
+            classifier_args=classifier_args,
+            buffer_ms=args.buffer_ms,
+            picks=None,  # or specify channel names
+            log_file=args.log_file
+        )
+    elif args.mode == 'lsl':
+        stream_eeg_lsl(
+            classifier_func=buffer_to_riemann_classifier,
+            classifier_args=classifier_args,
+            buffer_ms=args.buffer_ms,
+            sfreq=args.sfreq,
+            n_channels=args.n_channels,
+            log_file=args.log_file
+        )
+````
+
+**How to use:**
+- For offline simulation:  
+  `python simulate_eeg_stream.py --mode gdf --gdf_file yourfile.gdf --model_path mdm-model.pkl`
+- For real-time LSL:  
+  `python simulate_eeg_stream.py --mode lsl --model_path mdm-model.pkl --n_channels 8 --sfreq 256`
+
+**You can swap in your own channel selection, model, and filter settings as needed.**
+
+---
+
+**Summary:**  
+- `*online.py` = real-time classification in OpenViBE, no hardware control.  
+- `*online-added-serial.py` = adds serial (hardware) control.  
+- The code above lets you use the same PyRiemann pipeline for both offline simulation and real-time LSL streaming with your ANT Neuro system.
+
+JasonWongYH: where's mdm-model.pkl supposed to come from
+
+GitHub Copilot: `mdm-model.pkl` is a **trained PyRiemann MDM (Minimum Distance to Mean) model** file.  
+You create it by running a **calibration/training script** that:
+
+1. **Loads your calibration EEG data** (e.g., from a GDF or XDF file).
+2. **Segments the data into epochs** (trials) and assigns labels (e.g., "pre-act", "not-pre-act").
+3. **Applies the same preprocessing as your online pipeline** (bandpass filter, etc.).
+4. **Computes covariance matrices** for each epoch.
+5. **Fits the MDM classifier** on these covariance matrices and labels.
+6. **Saves the trained model** (including the covariance matrices and labels) as a pickle file, e.g.:
+   ``python
+   import pickle
+   trained = {'COV': cov_matrices, 'Labels': labels}
+   with open('mdm-model.pkl', 'wb') as f:
+       pickle.dump(trained, f)
+   ``
+
+**Summary:**  
+You must train and export `mdm-model.pkl` yourself using your own calibration data and the same preprocessing steps as your online pipeline.  
+If you need a template for this training script, just ask!
+
+JasonWongYH: is mdm-model yet another eeg classifier similar to the fgmdm in libet-features-classifiers.py ? can you implement 1. to 6. in a self contained code block that can be used in libet-features-classifiers.py alongside the other methods ?  
+
+GitHub Copilot: Yes, `mdm-model.pkl` is essentially the same type of classifier as the FgMDM in your Libet-features-classifiers.py—both use the **Minimum Distance to Mean (MDM)** classifier from PyRiemann, which works on covariance matrices of EEG epochs. The difference is just in how you save and load the trained model for use in real-time or simulated streaming.
+
+Below is a **self-contained code block** that implements steps 1–6 for training and saving an MDM model, ready to be added to your Libet-features-classifiers.py. This will let you generate `mdm-model.pkl` for use in your streaming code.
+
+````python
+# 1. to 6. Train and save an MDM model for real-time use
+from pyriemann.estimation import Covariances
+from pyriemann.classification import MDM
+import pickle
+import numpy as np
+
+def train_and_save_mdm_model(target_epochs, nontarget_epochs, model_path="mdm-model.pkl", reg=1e-6):
+    """
+    1. Concatenate target and nontarget epochs.
+    2. Assign labels (1 for target, 0 for nontarget).
+    3. Extract data and compute covariance matrices.
+    4. (Optional) Regularize covariance matrices.
+    5. Fit MDM classifier.
+    6. Save the model (covariances and labels) to a pickle file.
+    """
+    # 1 & 2
+    n_target = len(target_epochs)
+    n_nontarget = len(nontarget_epochs)
+    labels = np.concatenate([np.ones(n_target, dtype=int), np.zeros(n_nontarget, dtype=int)])
+    all_epochs = mne.concatenate_epochs([target_epochs, nontarget_epochs])
+    # 3
+    X = all_epochs.get_data() * 1e6  # (n_epochs, n_channels, n_times)
+    covs = Covariances().fit_transform(X)
+    # 4
+    covs += reg * np.eye(X.shape[1])[None, :, :]
+    # 5
+    mdm = MDM()
+    mdm.fit(covs, labels)
+    # 6
+    trained = {'COV': covs, 'Labels': labels}
+    with open(model_path, "wb") as f:
+        pickle.dump(trained, f)
+    print(f"[train_and_save_mdm_model] Saved MDM model to {model_path}")
+    return mdm
+
+# Example usage in your pipeline:
+# mdm = train_and_save_mdm_model(target_epochs, nontarget_epochs, model_path="mdm-model.pkl")
+````
+
+**How to use:**  
+- Call `train_and_save_mdm_model(target_epochs, nontarget_epochs, model_path="mdm-model.pkl")` after you have your epochs.
+- This will create `mdm-model.pkl` for use in your streaming/online code.
+- You can add this function to Libet-features-classifiers.py and call it alongside your other classifiers.
+
+**Summary:**  
+- `mdm-model.pkl` is a saved version of the same MDM classifier as your FgMDM, just serialized for later use.
+- The code above is all you need to generate it from your epochs.
